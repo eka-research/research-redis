@@ -1,0 +1,71 @@
+name: e2e
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind-e2e:
+    name: Ephemeral kind Cluster E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: app
+
+      - name: Checkout gitops repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: eka-research/research-redis-gitops
+          path: gitops
+
+      - name: Verify host vm.max_map_count for Elasticsearch
+        run: |
+          mmc="$(sysctl -n vm.max_map_count)"
+          echo "vm.max_map_count=$mmc"
+          if [ "$mmc" -lt 262144 ]; then
+            sudo sysctl -w vm.max_map_count=262144
+          fi
+
+      - name: Create kind cluster
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          version: v0.33.0
+          cluster_name: eka
+          config: app/kind/cluster.yaml
+          wait: 120s
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build API image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app/api
+          load: true
+          tags: ghcr.io/eka-research/research-redis:dev
+          cache-from: type=gha
+
+      - name: Load image & deploy manifests
+        working-directory: app
+        run: |
+          kind load docker-image ghcr.io/eka-research/research-redis:dev --name eka
+          GITOPS_DIR=../gitops bash scripts/deploy-direct.sh
+
+      - name: Run smoke tests through Gateway
+        working-directory: app
+        run: bash scripts/smoke.sh
+
+      - name: Dump cluster state on failure
+        if: failure()
+        run: |
+          kubectl get nodes,pods,svc,gateway,httproute -A -o wide || true
+          kubectl -n eka-data describe pods || true
+          kubectl -n eka-api logs -l app.kubernetes.io/name=api --tail=100 || true
