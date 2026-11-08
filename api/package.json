@@ -17,7 +17,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@elastic/elasticsearch": "^9.5.1",
-    "fastify": "^5.12.7",
+    "fastify": "^5.12.8",
     "ioredis": "^5.11.1",
     "mysql2": "^3.24.6",
     "prom-client": "^15.1.3"
