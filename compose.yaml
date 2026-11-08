@@ -1,0 +1,70 @@
+# Containerized dev & test loop (no host Node/npm install required).
+# Usage:
+#   docker compose run --rm api npm test
+#   docker compose --profile integration run --rm api npm run test:integration
+services:
+  api:
+    image: node:24.22.2-alpine
+    working_dir: /w
+    volumes:
+      - ./api:/w
+      - api_node_modules:/w/node_modules
+    environment:
+      PORT: "8080"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: kind-dev-redis-pw
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: eka
+      MYSQL_USER: eka
+      MYSQL_PASSWORD: kind-dev-mysql-pw
+      ES_URL: http://elasticsearch:9200
+      ES_USERNAME: elastic
+      ES_PASSWORD: kind-dev-elastic-pw
+      ES_INDEX: items
+    command: ["sh", "-c", "npm ci --no-audit --no-fund && node src/migrate.js && node src/server.js"]
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  redis:
+    image: redis:8.8.4-alpine
+    profiles: ["integration"]
+    command: ["redis-server", "--requirepass", "kind-dev-redis-pw"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "kind-dev-redis-pw", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  mysql:
+    image: mysql:8.4.9
+    profiles: ["integration"]
+    environment:
+      MYSQL_ROOT_PASSWORD: kind-dev-mysql-root-pw
+      MYSQL_DATABASE: eka
+      MYSQL_USER: eka
+      MYSQL_PASSWORD: kind-dev-mysql-pw
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pkind-dev-mysql-root-pw"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.5
+    profiles: ["integration"]
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      xpack.ml.enabled: "false"
+      ELASTIC_PASSWORD: kind-dev-elastic-pw
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      cluster.routing.allocation.disk.watermark.low: 3gb
+      cluster.routing.allocation.disk.watermark.high: 2gb
+      cluster.routing.allocation.disk.watermark.flood_stage: 1gb
+
+volumes:
+  api_node_modules:

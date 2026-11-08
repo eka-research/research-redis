@@ -1,0 +1,6 @@
+node_modules/
+coverage/
+.eslintcache
+*.log
+.DS_Store
+sbom.spdx.json

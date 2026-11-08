@@ -1,0 +1,127 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint-unit:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm test
+
+  integration:
+    name: Integration Tests (Service Containers)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    services:
+      redis:
+        image: redis:8.8.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --entrypoint redis-server
+          --health-cmd "redis-cli -a kind-dev-redis-pw ping"
+          --health-interval 5s
+          --health-timeout 2s
+          --health-retries 10
+        cmd: ["--requirepass", "kind-dev-redis-pw"]
+      mysql:
+        image: mysql:8.4.9
+        ports: ["3306:3306"]
+        env:
+          MYSQL_ROOT_PASSWORD: kind-dev-mysql-root-pw
+          MYSQL_DATABASE: eka
+          MYSQL_USER: eka
+          MYSQL_PASSWORD: kind-dev-mysql-pw
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pkind-dev-mysql-root-pw"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:9.5.5
+        ports: ["9200:9200"]
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "true"
+          xpack.security.http.ssl.enabled: "false"
+          xpack.security.transport.ssl.enabled: "false"
+          xpack.ml.enabled: "false"
+          ELASTIC_PASSWORD: kind-dev-elastic-pw
+          ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Wait for Elasticsearch HTTP
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS -u elastic:kind-dev-elastic-pw http://127.0.0.1:9200/_cluster/health >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - run: npm ci --no-audit --no-fund
+      - name: Run integration tests
+        env:
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: "6379"
+          REDIS_PASSWORD: kind-dev-redis-pw
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: "3306"
+          MYSQL_DATABASE: eka
+          MYSQL_USER: eka
+          MYSQL_PASSWORD: kind-dev-mysql-pw
+          ES_URL: http://127.0.0.1:9200
+          ES_USERNAME: elastic
+          ES_PASSWORD: kind-dev-elastic-pw
+          ES_INDEX: items
+        run: npm run test:integration
+
+  image-scan:
+    name: Image Build & Trivy Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: api
+          load: true
+          tags: ghcr.io/eka-research/research-redis:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/eka-research/research-redis:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
