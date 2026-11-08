@@ -64,7 +64,7 @@ jobs:
         run: bash scripts/smoke.sh
 
       - name: Dump cluster state on failure
-        if: failure()
+        # if: failure()
         run: |
           kubectl get nodes,pods,svc,gateway,httproute -A -o wide || true
           kubectl -n eka-data describe pods || true
