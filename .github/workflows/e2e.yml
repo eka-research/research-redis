@@ -5,7 +5,7 @@ on:
 
 permissions:
   contents: read
-
+ 
 concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
@@ -64,8 +64,9 @@ jobs:
         run: bash scripts/smoke.sh
 
       - name: Dump cluster state on failure
-        if: failure()
+        # if: failure()
         run: |
           kubectl get nodes,pods,svc,gateway,httproute -A -o wide || true
           kubectl -n eka-data describe pods || true
           kubectl -n eka-api logs -l app.kubernetes.io/name=api --tail=100 || true
+          echo "THis is POOP" || true
