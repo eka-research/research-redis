@@ -41,12 +41,10 @@ jobs:
         image: redis:8.8.4-alpine
         ports: ["6379:6379"]
         options: >-
-          --entrypoint redis-server
-          --health-cmd "redis-cli -a kind-dev-redis-pw ping"
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 2s
           --health-retries 10
-        cmd: ["--requirepass", "kind-dev-redis-pw"]
       mysql:
         image: mysql:8.4.9
         ports: ["3306:3306"]
@@ -92,7 +90,6 @@ jobs:
         env:
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: "6379"
-          REDIS_PASSWORD: kind-dev-redis-pw
           MYSQL_HOST: 127.0.0.1
           MYSQL_PORT: "3306"
           MYSQL_DATABASE: eka
