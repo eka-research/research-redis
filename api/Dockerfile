@@ -9,6 +9,10 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 FROM ${NODE_IMAGE}
+# Strip npm/npx/corepack/yarn from the runtime stage: not used at runtime
+# (CMD invokes `node` directly), shrinks the image, and eliminates CVEs in
+# npm's bundled dependencies (/usr/local/lib/node_modules/npm).
+RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn*
 ENV NODE_ENV=production \
     PORT=8080
 WORKDIR /app
